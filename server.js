@@ -1,5 +1,6 @@
 const express = require('express');
 const path = require('path');
+const fs = require('fs');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -138,6 +139,22 @@ app.post('/api/reply', rateLimit, async (req, res) => {
   }
 });
 
+app.post('/api/chat', rateLimit, async (req, res) => {
+  try {
+    const message = clean(req.body?.message, 8000);
+    if (!message) return res.status(400).json({ error: 'Message is required.' });
+    const conversation = Array.isArray(req.body?.conversation) ? req.body.conversation.slice(-12).map(item => ({ role: item?.role === 'assistant' ? 'assistant' : 'user', content: clean(item?.content, 6000) })).filter(item => item.content) : [];
+    const context = objectToText(req.body?.context, 8000);
+    const system = `You are NTEK AI Work Assistant, a capable AI assistant inside NTEK's eBay support workspace.\n\nYou can help the seller perform work such as drafting/revising eBay buyer replies, explaining buyer messages, improving product titles, writing eBay UK descriptions, rewriting text, creating listing ideas, analysing provided information, translating, brainstorming and giving practical business support.\n\nUnderstand commands in English, Roman Urdu, or mixed language. If the user asks you to create something, create it directly rather than merely explaining how. If information is missing, ask only for the information actually needed to complete the task. Never invent facts about NTEK, products, orders, customers, prices, policies, tracking or stock. When a task concerns a buyer-facing eBay reply, follow NTEK's customer-support principles: use company voice (we, never I), respond to the buyer's actual situation, do not unnecessarily request seller-side order/tracking details, request issue-specific evidence such as photos only when genuinely useful, and never promise unsupported outcomes.\n\nYou may use supplied workspace context as facts, but do not pretend to have access to eBay, GitHub, Vercel, orders, listings, files, accounts, or external systems unless the application actually provides such a tool. Do not claim an action was performed when you only generated text.\n\nBe practical, concise and natural. If the user asks for a ready-to-use piece of content, return the content ready to copy.\n\nWORKSPACE CONTEXT:\n${context || 'No additional workspace context provided.'}`;
+    const messages = [{ role: 'system', content: system }, ...conversation, { role: 'user', content: message }];
+    const reply = await callGroq(messages, 1000, 0.55);
+    res.json({ reply });
+  } catch (error) {
+    console.error('Chat endpoint error:', error);
+    res.status(error.status || 500).json({ error: error.message || 'Unable to respond right now.' });
+  }
+});
+
 app.post('/api/description', rateLimit, async (req, res) => {
   try {
     const title = clean(req.body?.title, 1000);
@@ -151,6 +168,36 @@ app.post('/api/description', rateLimit, async (req, res) => {
   } catch (error) {
     console.error('Description endpoint error:', error);
     res.status(error.status || 500).json({ error: error.message || 'Unable to generate the description right now.' });
+  }
+});
+
+// Add the AI Work Assistant UI to the existing app without replacing the user's current design.
+app.get('/', (_req, res) => {
+  try {
+    const file = fs.readFileSync(path.join(__dirname, 'public', 'index.html'), 'utf8');
+    const widget = `
+<style>
+#ntekAssistantFab{position:fixed;right:24px;bottom:24px;z-index:50;width:58px;height:58px;border:0;border-radius:50%;background:linear-gradient(135deg,#1769e0,#0f56c7);color:#fff;box-shadow:0 12px 30px rgba(23,105,224,.28);cursor:pointer;font-size:22px;font-weight:800;transition:.2s}#ntekAssistantFab:hover{transform:translateY(-3px) scale(1.03);box-shadow:0 16px 34px rgba(23,105,224,.34)}#ntekAssistant{position:fixed;right:24px;bottom:94px;z-index:49;width:min(430px,calc(100vw - 32px));height:min(680px,calc(100vh - 125px));background:#fff;border:1px solid #dfe6ef;border-radius:18px;box-shadow:0 24px 70px rgba(16,35,63,.2);display:none;overflow:hidden;flex-direction:column}#ntekAssistant.open{display:flex;animation:ntekChatIn .2s ease}@keyframes ntekChatIn{from{opacity:0;transform:translateY(10px) scale(.98)}to{opacity:1;transform:none}}.ntek-chat-head{display:flex;align-items:center;justify-content:space-between;padding:15px 17px;background:linear-gradient(135deg,#0b1f3a,#12345e);color:#fff}.ntek-chat-brand{display:flex;gap:10px;align-items:center}.ntek-chat-avatar{width:36px;height:36px;border-radius:10px;background:#fff;color:#0b1f3a;display:grid;place-items:center;font-weight:900}.ntek-chat-title{font-weight:800;font-size:14px}.ntek-chat-sub{font-size:11px;opacity:.72;margin-top:2px}.ntek-chat-actions{display:flex;gap:6px}.ntek-chat-actions button{border:0;background:rgba(255,255,255,.1);color:#fff;border-radius:8px;width:31px;height:31px;cursor:pointer}.ntek-chat-actions button:hover{background:rgba(255,255,255,.18)}#ntekChatMessages{flex:1;overflow:auto;padding:17px;background:#f7f9fc}.ntek-msg{display:flex;margin:0 0 12px}.ntek-msg.user{justify-content:flex-end}.ntek-bubble{max-width:86%;padding:11px 13px;border-radius:14px;white-space:pre-wrap;line-height:1.5;font-size:13px}.ntek-msg.assistant .ntek-bubble{background:#fff;border:1px solid #e2e8f0;border-top-left-radius:5px;color:#172033}.ntek-msg.user .ntek-bubble{background:#1769e0;color:#fff;border-top-right-radius:5px}.ntek-chat-compose{padding:12px;border-top:1px solid #e4e9f0;background:#fff}.ntek-compose-row{display:flex;gap:8px;align-items:flex-end}.ntek-compose-row textarea{flex:1;min-height:46px;max-height:130px;resize:none;border:1px solid #d6dee8;border-radius:12px;padding:11px 12px;outline:none}.ntek-compose-row textarea:focus{border-color:#77a8ee;box-shadow:0 0 0 4px rgba(23,105,224,.08)}#ntekChatSend{width:46px;height:46px;border:0;border-radius:12px;background:#1769e0;color:#fff;cursor:pointer;font-weight:800}#ntekChatSend:disabled{opacity:.5;cursor:not-allowed}.ntek-chat-hint{font-size:10px;color:#7b8798;margin:7px 2px 0}.ntek-typing{opacity:.65;font-style:italic}.ntek-chat-empty{padding:25px 15px;text-align:center;color:#667085}.ntek-chat-empty strong{display:block;color:#172033;margin-bottom:6px}.ntek-chat-suggests{display:flex;gap:7px;flex-wrap:wrap;justify-content:center;margin-top:14px}.ntek-chat-suggests button{border:1px solid #dbe4ef;background:#fff;color:#18304f;border-radius:999px;padding:7px 10px;font-size:11px;cursor:pointer}.ntek-chat-suggests button:hover{border-color:#8ab5f2;background:#f5f9ff}@media(max-width:650px){#ntekAssistant{right:10px;bottom:76px;width:calc(100vw - 20px);height:calc(100vh - 95px)}#ntekAssistantFab{right:14px;bottom:78px}}
+</style>
+<button id="ntekAssistantFab" aria-label="Open NTEK AI Work Assistant" title="NTEK AI Work Assistant">✦</button>
+<div id="ntekAssistant" aria-label="NTEK AI Work Assistant">
+  <div class="ntek-chat-head"><div class="ntek-chat-brand"><div class="ntek-chat-avatar">N</div><div><div class="ntek-chat-title">NTEK AI Work Assistant</div><div class="ntek-chat-sub">Ask me to create, rewrite, analyse or improve something</div></div></div><div class="ntek-chat-actions"><button id="ntekChatClear" title="New chat">↺</button><button id="ntekChatClose" title="Close">×</button></div></div>
+  <div id="ntekChatMessages"><div class="ntek-chat-empty"><strong>What can we work on?</strong>Tell me what you want done. You can write in English, Roman Urdu, or both.<div class="ntek-chat-suggests"><button data-chat="Is buyer message ko samjhao aur best reply banao.">Buyer reply</button><button data-chat="Is product ke liye 5 professional eBay UK titles banao.">Listing titles</button><button data-chat="Meri product details se eBay HTML description banao.">Description</button></div></div></div>
+  <div class="ntek-chat-compose"><div class="ntek-compose-row"><textarea id="ntekChatInput" placeholder="Tell AI what you want done..." rows="1"></textarea><button id="ntekChatSend" title="Send">↑</button></div><div class="ntek-chat-hint">AI creates drafts and content. It does not send eBay messages or change listings automatically.</div></div>
+</div>
+<script>
+(()=>{const fab=document.getElementById('ntekAssistantFab'),box=document.getElementById('ntekAssistant'),close=document.getElementById('ntekChatClose'),clear=document.getElementById('ntekChatClear'),input=document.getElementById('ntekChatInput'),send=document.getElementById('ntekChatSend'),messagesEl=document.getElementById('ntekChatMessages');let conversation=[];let busy=false;
+function openChat(){box.classList.add('open');setTimeout(()=>input.focus(),50)}function closeChat(){box.classList.remove('open')}function renderMessage(role,text){const row=document.createElement('div');row.className='ntek-msg '+role;const bubble=document.createElement('div');bubble.className='ntek-bubble';bubble.textContent=text;row.appendChild(bubble);messagesEl.appendChild(row);messagesEl.scrollTop=messagesEl.scrollHeight;return bubble}
+function reset(){conversation=[];messagesEl.innerHTML='<div class="ntek-chat-empty"><strong>What can we work on?</strong>Tell me what you want done. You can write in English, Roman Urdu, or both.<div class="ntek-chat-suggests"><button data-chat="Is buyer message ko samjhao aur best reply banao.">Buyer reply</button><button data-chat="Is product ke liye 5 professional eBay UK titles banao.">Listing titles</button><button data-chat="Meri product details se eBay HTML description banao.">Description</button></div></div>';bindSuggestions()}
+async function ask(){if(busy)return;const text=input.value.trim();if(!text)return;document.querySelector('.ntek-chat-empty')?.remove();renderMessage('user',text);conversation.push({role:'user',content:text});input.value='';input.style.height='auto';busy=true;send.disabled=true;const typing=renderMessage('assistant','Thinking…');typing.classList.add('ntek-typing');try{const r=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:text,conversation:conversation.slice(-12)})});const d=await r.json();if(!r.ok)throw new Error(d.error||'Request failed');typing.classList.remove('ntek-typing');typing.textContent=d.reply;conversation.push({role:'assistant',content:d.reply});}catch(e){typing.classList.remove('ntek-typing');typing.textContent=e.message||'Unable to respond right now.'}finally{busy=false;send.disabled=false;input.focus();messagesEl.scrollTop=messagesEl.scrollHeight}}
+function bindSuggestions(){messagesEl.querySelectorAll('[data-chat]').forEach(b=>b.onclick=()=>{input.value=b.dataset.chat;input.dispatchEvent(new Event('input'));openChat();ask()})}
+fab.onclick=openChat;close.onclick=close;clear.onclick=reset;send.onclick=ask;input.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();ask()}});input.addEventListener('input',()=>{input.style.height='auto';input.style.height=Math.min(input.scrollHeight,130)+'px'});bindSuggestions();
+})();
+</script>`;
+    return res.type('html').send(file.replace('</body>', widget + '</body>'));
+  } catch (error) {
+    console.error('UI injection error:', error);
+    return res.sendFile(path.join(__dirname, 'public', 'index.html'));
   }
 });
 
