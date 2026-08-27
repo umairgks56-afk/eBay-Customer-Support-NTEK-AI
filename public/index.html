@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NTEK eBay Customer Support AI</title>
+  <style>
+    *{box-sizing:border-box}body{margin:0;font-family:Inter,Arial,sans-serif;background:#f4f7fb;color:#172033}.wrap{max-width:900px;margin:0 auto;padding:28px 18px}.card{background:#fff;border:1px solid #e4e9f0;border-radius:18px;padding:24px;box-shadow:0 8px 30px rgba(20,35,60,.06)}h1{margin:0 0 6px;font-size:28px}.sub{color:#667085;margin:0 0 24px}.grid{display:grid;gap:16px}label{font-weight:700;font-size:14px;margin-bottom:6px;display:block}textarea,select{width:100%;border:1px solid #d5dbe5;border-radius:10px;padding:12px;font:inherit;background:#fff}textarea{min-height:150px;resize:vertical}.context{min-height:90px}.actions{display:flex;gap:10px;flex-wrap:wrap}button{border:0;border-radius:10px;padding:12px 18px;font-weight:700;cursor:pointer;background:#0b57d0;color:#fff}button.secondary{background:#eef3fb;color:#17315f}button:disabled{opacity:.6;cursor:not-allowed}.result{margin-top:20px;padding:16px;border-radius:12px;background:#f7f9fc;border:1px solid #e4e9f0;white-space:pre-wrap;line-height:1.55;min-height:80px}.status{font-size:13px;color:#667085;margin-top:10px}.brand{font-size:13px;font-weight:800;letter-spacing:.08em;color:#0b57d0;text-transform:uppercase;margin-bottom:8px}
+  </style>
+</head>
+<body>
+  <main class="wrap">
+    <div class="card">
+      <div class="brand">NTEK · eBay Support</div>
+      <h1>Customer Support AI</h1>
+      <p class="sub">Paste the buyer's message and generate a ready-to-send eBay reply.</p>
+      <div class="grid">
+        <div>
+          <label for="buyer">Buyer message</label>
+          <textarea id="buyer" placeholder="Example: Hi, when will my order arrive?"></textarea>
+        </div>
+        <div>
+          <label for="context">Seller context (optional)</label>
+          <textarea id="context" class="context" placeholder="Example: Order was dispatched today. Tracking will update within 24 hours."></textarea>
+        </div>
+        <div>
+          <label for="tone">Tone</label>
+          <select id="tone">
+            <option>friendly and professional</option>
+            <option>short and direct</option>
+            <option>very polite and reassuring</option>
+            <option>apologetic and helpful</option>
+          </select>
+        </div>
+        <div class="actions">
+          <button id="generate">Generate Reply</button>
+          <button id="copy" class="secondary" disabled>Copy Reply</button>
+        </div>
+        <div id="status" class="status"></div>
+        <div id="result" class="result">Your generated reply will appear here.</div>
+      </div>
+    </div>
+  </main>
+<script>
+const buyer=document.getElementById('buyer');
+const context=document.getElementById('context');
+const tone=document.getElementById('tone');
+const generate=document.getElementById('generate');
+const copy=document.getElementById('copy');
+const result=document.getElementById('result');
+const status=document.getElementById('status');
+
+generate.onclick=async()=>{
+  if(!buyer.value.trim()){status.textContent='Please paste the buyer message first.';return}
+  generate.disabled=true;copy.disabled=true;status.textContent='Generating reply…';
+  try{
+    const r=await fetch('/api/reply',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({buyerMessage:buyer.value,context:context.value,tone:tone.value})});
+    const data=await r.json();
+    if(!r.ok) throw new Error(data.error||'Request failed');
+    result.textContent=data.reply;copy.disabled=false;status.textContent='Reply generated successfully.';
+  }catch(e){result.textContent='';status.textContent='Error: '+e.message}
+  finally{generate.disabled=false}
+};
+copy.onclick=async()=>{await navigator.clipboard.writeText(result.textContent);status.textContent='Reply copied.'};
+</script>
+</body>
+</html>
