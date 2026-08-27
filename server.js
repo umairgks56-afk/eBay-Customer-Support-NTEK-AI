@@ -1,139 +1,85 @@
-import express from "express";
-import Groq from "groq-sdk";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
+const express = require('express');
+const path = require('path');
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 const app = express();
-const port = Number(process.env.PORT || 3000);
-const model = process.env.GROQ_MODEL || "openai/gpt-oss-120b";
+const PORT = process.env.PORT || 3000;
+const GROQ_API_URL = 'https://api.groq.com/openai/v1/chat/completions';
+const GROQ_MODEL = process.env.GROQ_MODEL || 'openai/gpt-oss-120b';
+const RATE_LIMIT_WINDOW_MS = Number(process.env.RATE_LIMIT_WINDOW_MS || 10 * 60 * 1000);
+const RATE_LIMIT_MAX = Number(process.env.RATE_LIMIT_MAX || 20);
+const buckets = new Map();
 
-app.disable("x-powered-by");
-app.use(express.json({ limit: "256kb" }));
-app.use(express.static(path.join(__dirname, "public"), { extensions: ["html"] }));
-
-// Lightweight per-instance protection for a private tool. Vercel may run multiple
-// instances, so this is intentionally a safety layer rather than a replacement for
-// an external auth/rate-limit service.
-const rateWindowMs = 10 * 60 * 1000;
-const maxRequestsPerWindow = 20;
-const requestLog = new Map();
-
-function getClientIp(req) {
-  const forwarded = req.headers["x-forwarded-for"];
-  if (typeof forwarded === "string" && forwarded) return forwarded.split(",")[0].trim();
-  return req.ip || req.socket?.remoteAddress || "unknown";
-}
+app.disable('x-powered-by');
+app.set('trust proxy', 1);
+app.use(express.json({ limit: '32kb' }));
+app.use(express.urlencoded({ extended: false, limit: '32kb' }));
 
 function rateLimit(req, res, next) {
   const now = Date.now();
-  const ip = getClientIp(req);
-  const recent = (requestLog.get(ip) || []).filter((time) => now - time < rateWindowMs);
-
-  if (recent.length >= maxRequestsPerWindow) {
-    const retryAfter = Math.max(1, Math.ceil((rateWindowMs - (now - recent[0])) / 1000));
-    res.set("Retry-After", String(retryAfter));
-    return res.status(429).json({ error: "Too many requests. Please try again shortly." });
+  const ip = req.ip || req.socket.remoteAddress || 'unknown';
+  let bucket = buckets.get(ip);
+  if (!bucket || now - bucket.start >= RATE_LIMIT_WINDOW_MS) {
+    bucket = { start: now, count: 0 };
+    buckets.set(ip, bucket);
   }
-
-  recent.push(now);
-  requestLog.set(ip, recent);
-  return next();
+  bucket.count += 1;
+  if (bucket.count > RATE_LIMIT_MAX) {
+    const retryAfter = Math.ceil((RATE_LIMIT_WINDOW_MS - (now - bucket.start)) / 1000);
+    res.set('Retry-After', String(retryAfter));
+    return res.status(429).json({ error: 'Too many requests. Please try again later.' });
+  }
+  next();
 }
 
-function cleanText(value, maxLength) {
-  return typeof value === "string" ? value.trim().slice(0, maxLength) : "";
+function clean(value, max) {
+  return typeof value === 'string' ? value.trim().slice(0, max) : '';
 }
 
-function getClient() {
-  return process.env.GROQ_API_KEY ? new Groq({ apiKey: process.env.GROQ_API_KEY }) : null;
-}
-
-const systemPrompt = `You are NTEK eBay Customer Support AI for a UK eBay seller of household and everyday products. Write natural, polite, concise buyer-facing replies in UK English.
-Rules:
-- Never invent tracking, delivery dates, refunds, stock, guarantees or policies.
-- Use only buyer/seller facts supplied in the request.
-- If facts are missing, ask for confirmation or the necessary information.
-- Never mention being an AI.
-- De-escalate complaints and offer a practical next step when appropriate.
-- Do not promise an outcome the seller has not confirmed.
-- Return only the ready-to-send buyer reply.`;
-
-app.get("/api/health", (_req, res) => {
-  res.json({ ok: true, service: "NTEK Support AI", provider: "Groq", model });
+app.get('/api/health', (_req, res) => {
+  res.json({ ok: true, provider: 'groq', model: GROQ_MODEL });
 });
 
-app.post("/api/reply", rateLimit, async (req, res) => {
+app.post('/api/reply', rateLimit, async (req, res) => {
   try {
-    const client = getClient();
-    if (!client) {
-      return res.status(503).json({ error: "Groq AI is not configured. Add GROQ_API_KEY in Vercel Environment Variables." });
-    }
+    const apiKey = process.env.GROQ_API_KEY;
+    if (!apiKey) return res.status(503).json({ error: 'AI service is not configured.' });
 
-    const body = req.body || {};
-    const buyerMessage = cleanText(body.buyerMessage, 6000);
-    const context = cleanText(body.context, 5000);
-    const tone = cleanText(body.tone, 120) || "friendly and professional";
-    const length = cleanText(body.length, 40) || "normal";
-    const productInfo = cleanText(body.productInfo, 4000);
-    const settings = body.settings && typeof body.settings === "object" ? body.settings : {};
-    const store = cleanText(settings.store, 120) || "NTEK";
-    const signature = cleanText(settings.signature, 300);
-    const instructions = cleanText(settings.instructions, 1500);
+    const buyerMessage = clean(req.body?.buyerMessage, 5000);
+    const context = clean(req.body?.context, 5000);
+    const settings = clean(req.body?.settings, 3000);
+    if (!buyerMessage) return res.status(400).json({ error: 'Buyer message is required.' });
 
-    if (!buyerMessage) {
-      return res.status(400).json({ error: "Please provide a buyer message." });
-    }
+    const system = `You are NTEK eBay customer support. Write a concise, polite, professional UK-English buyer reply. Never invent order facts, tracking details, refunds, policies, or promises. If information is missing, say so clearly. Return only the message ready to send.`;
+    const user = `Buyer message:\n${buyerMessage}\n\nOrder/context:\n${context || 'None provided'}\n\nReply preferences:\n${settings || 'Professional, friendly, concise'}`;
 
-    const userPrompt = `Create an eBay buyer reply.
-Tone: ${tone}
-Length: ${length}
-Store: ${store}
-Default signature: ${signature || "None"}
-Seller instructions: ${instructions || "None"}
-Product information: ${productInfo || "None"}
-Seller/order context: ${context || "No additional context."}
-
-Buyer message:
-${buyerMessage}`;
-
-    const completion = await client.chat.completions.create({
-      model,
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userPrompt }
-      ],
-      temperature: 0.55,
-      max_completion_tokens: 500
+    const response = await fetch(GROQ_API_URL, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: GROQ_MODEL, temperature: 0.4, max_tokens: 500, messages: [
+        { role: 'system', content: system },
+        { role: 'user', content: user }
+      ] })
     });
 
-    const reply = completion.choices?.[0]?.message?.content?.trim();
-    if (!reply) {
-      return res.status(502).json({ error: "The AI returned an empty response." });
+    if (!response.ok) {
+      const detail = await response.text();
+      console.error('Groq API error:', response.status, detail.slice(0, 1000));
+      return res.status(502).json({ error: 'The AI provider is temporarily unavailable.' });
     }
 
-    return res.json({ reply, model });
+    const data = await response.json();
+    const reply = data?.choices?.[0]?.message?.content?.trim();
+    if (!reply) return res.status(502).json({ error: 'The AI returned an empty response.' });
+    res.json({ reply });
   } catch (error) {
-    console.error("Groq request failed:", error);
-    const status = Number(error?.status) || 500;
-    const publicMessage = status === 429
-      ? "Groq rate limit reached. Please wait a moment and try again."
-      : status >= 500
-        ? "The AI service is temporarily unavailable. Please try again shortly."
-        : "The AI request could not be completed.";
-    return res.status(status).json({ error: publicMessage });
+    console.error('Reply endpoint error:', error);
+    res.status(500).json({ error: 'Unable to generate a reply right now.' });
   }
 });
 
-// Express 5 requires a named wildcard. This also catches the root route for the SPA.
-app.get("/{*splat}", (_req, res) => {
-  res.sendFile(path.join(__dirname, "public", "index.html"));
-});
+app.use(express.static(path.join(__dirname, 'public')));
+app.get('/{*splat}', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
-// Vercel uses the exported Express app. Local development still uses npm start.
-export default app;
+if (!process.env.VERCEL) app.listen(PORT, () => console.log(`NTEK AI running on port ${PORT}`));
 
-if (!process.env.VERCEL) {
-  app.listen(port, () => console.log(`NTEK Support AI running on port ${port}`));
-}
+module.exports = app;

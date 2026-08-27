@@ -1,16 +1,10 @@
 {
-  "name": "ebay-customer-support-ntek-ai",
-  "version": "1.1.0",
+  "name": "ntek-ebay-customer-support-ai",
+  "version": "1.0.0",
   "private": true,
-  "type": "module",
-  "engines": {
-    "node": ">=20"
-  },
-  "scripts": {
-    "start": "node server.js"
-  },
-  "dependencies": {
-    "express": "^5.1.0",
-    "groq-sdk": "^0.37.0"
-  }
+  "description": "NTEK eBay Customer Support AI powered by Groq",
+  "main": "server.js",
+  "scripts": { "start": "node server.js" },
+  "engines": { "node": ">=20" },
+  "dependencies": { "express": "^5.1.0" }
 }

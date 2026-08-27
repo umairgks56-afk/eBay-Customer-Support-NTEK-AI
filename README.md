@@ -1,62 +1,30 @@
 # NTEK eBay Customer Support AI
 
-A lightweight eBay buyer-reply generator powered by the Groq API.
+NTEK's eBay buyer-reply generator powered by the Groq API.
 
-## Current Groq model
+## Groq setup
 
-The app currently defaults to:
+Create an API key in the Groq Console and add these environment variables to your host:
 
-`openai/gpt-oss-120b`
-
-Groq currently lists GPT-OSS 120B as a production model. Groq also provides a free tier with model-specific rate limits; exact limits can change, so check your Groq Console before production use.
-
-## Required environment variables
-
-Set these on Vercel under **Project Settings → Environment Variables**:
-
-- `GROQ_API_KEY` — your private Groq API key
-- `GROQ_MODEL` — optional; defaults to `openai/gpt-oss-120b`
-
-**Never put the real API key in GitHub, frontend JavaScript, or `.env.example`.**
-
-## Local setup
-
-```bash
-npm install
-```
-
-Create `.env` locally:
-
-```env
-GROQ_API_KEY=your_real_groq_key
-GROQ_MODEL=openai/gpt-oss-120b
-```
-
-Then run:
-
-```bash
-npm start
-```
-
-The app is served by Express and exposes `/api/reply` and `/api/health`.
+- `GROQ_API_KEY` — secret Groq API key. Never commit it.
+- `GROQ_MODEL` — optional; defaults to `openai/gpt-oss-120b`.
 
 ## Vercel deployment
 
-1. Import this GitHub repository into Vercel.
-2. Use the default Node/Express detection.
-3. Add `GROQ_API_KEY` in Vercel Environment Variables for the Production environment (and Preview if needed).
-4. Optionally add `GROQ_MODEL=openai/gpt-oss-120b`.
-5. Deploy.
-6. Open `/api/health` on the deployed domain to verify the app is running.
+Import this GitHub repository into Vercel. Use the repository root as the Root Directory. No build command or output directory is required. Add the environment variables above for Production and Preview, then deploy.
 
-The Express app is exported for Vercel and only calls `app.listen()` during local development.
+## Local development
 
-## Security protections
+```bash
+npm install
+GROQ_API_KEY=gsk_your_key npm start
+```
 
-- Groq API key stays server-side.
-- Express 5 wildcard routing is compatible with the current Express syntax.
-- JSON request body is limited to 256 KB.
-- Buyer/context/settings fields have explicit length limits.
-- `/api/reply` has a lightweight per-IP rate limit.
-- Detailed upstream Groq errors are not exposed to public clients.
-- `.env`, `.env.local`, and `.vercel` are ignored by Git.
+On Windows PowerShell:
+
+```powershell
+$env:GROQ_API_KEY="gsk_your_key"
+npm start
+```
+
+The Express app serves the UI and `/api/reply`. The server has request-size validation, basic per-IP rate limiting, safe public error messages, and keeps the Groq key server-side.
