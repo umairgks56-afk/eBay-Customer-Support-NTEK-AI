@@ -68,8 +68,4 @@ app.post("/api/reply", async (req, res) => {
   }
 });
 
-app.get("*", (_req, res) => {
-  res.sendFile(path.join(__dirname, "public", "index.html"));
-});
-
 app.listen(port, () => console.log(`NTEK eBay Support AI running on port ${port}`));
