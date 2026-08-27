@@ -7,7 +7,8 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const app = express();
 const port = process.env.PORT || 3000;
-const model = process.env.GROQ_MODEL || "qwen/qwen3-32b";
+// Groq retired qwen/qwen3-32b on July 17, 2026. Use the current recommended model.
+const model = process.env.GROQ_MODEL || "openai/gpt-oss-120b";
 
 app.use(express.json({ limit: "1mb" }));
 app.use(express.static(path.join(__dirname, "public")));
@@ -66,6 +67,10 @@ app.post("/api/reply", async (req, res) => {
     const status = error?.status || 500;
     res.status(status).json({ error: error?.error?.error?.message || error?.message || "AI request failed." });
   }
+});
+
+app.get("*", (_req, res) => {
+  res.sendFile(path.join(__dirname, "public", "index.html"));
 });
 
 app.listen(port, () => console.log(`NTEK eBay Support AI running on port ${port}`));
