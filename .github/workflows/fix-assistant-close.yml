@@ -1,0 +1,54 @@
+name: Fix AI Assistant Close Button
+
+on:
+  push:
+    paths:
+      - '.github/workflows/fix-assistant-close.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Patch assistant close button
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('public/index.html')
+          s = p.read_text(encoding='utf-8')
+
+          old = '<button class="btn secondary clear-chat" id="clearChat">New Chat</button>'
+          new = '<div class="assistant-head-actions"><button class="btn secondary clear-chat" id="clearChat">New Chat</button><button class="assistant-close" id="closeAssistant" aria-label="Close AI Assistant" title="Close">×</button></div>'
+          if old not in s:
+              raise SystemExit('Expected assistant header button was not found; stopping safely.')
+          s = s.replace(old, new, 1)
+
+          css_anchor = '.clear-chat{font-size:12px;padding:8px 10px;}'
+          css_new = css_anchor + '.assistant-head-actions{display:flex;align-items:center;gap:8px}.assistant-close{width:38px;height:38px;border:1px solid #e0e6ee;border-radius:10px;background:#fff;color:#344054;font-size:24px;line-height:1;cursor:pointer;display:grid;place-items:center;transition:.18s}.assistant-close:hover{background:#fff1f0;border-color:#f3c7c2;color:#b42318;transform:translateY(-1px);box-shadow:0 5px 14px rgba(16,35,63,.08)}.assistant-close:focus-visible{outline:3px solid rgba(23,105,224,.18);outline-offset:2px}'
+          if css_anchor not in s:
+              raise SystemExit('Expected clear-chat CSS anchor was not found; stopping safely.')
+          s = s.replace(css_anchor, css_new, 1)
+
+          js_anchor = "$('clearChat').onclick=()=>{assistantMessages=[];localStorage.removeItem('ntekAssistantChat');renderAssistant();toast('New chat started')};"
+          js_new = js_anchor + "$('closeAssistant').onclick=()=>{showTab('dashboard');toast('AI Assistant closed')};"
+          if js_anchor not in s:
+              raise SystemExit('Expected clearChat handler was not found; stopping safely.')
+          s = s.replace(js_anchor, js_new, 1)
+
+          p.write_text(s, encoding='utf-8')
+          PY
+
+      - name: Commit patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add public/index.html
+          git diff --cached --quiet && exit 0
+          git commit -m "Fix AI assistant close button"
+          git push
