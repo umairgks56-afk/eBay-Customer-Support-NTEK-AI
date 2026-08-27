@@ -1,9 +1,10 @@
-name: Fix AI Assistant Close Button
+name: Fix NTEK Assistant and Reply Behaviour
 
 on:
   push:
     branches: [main]
     paths:
+      - 'server.js'
       - 'public/index.html'
       - '.github/workflows/fix-assistant-close.yml'
   workflow_dispatch:
@@ -20,39 +21,61 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Patch assistant close button
+      - name: Remove floating assistant and install NTEK reply playbook
         run: |
           python - <<'PY'
           from pathlib import Path
-          p = Path('public/index.html')
+          import re
+
+          p = Path('server.js')
           s = p.read_text(encoding='utf-8')
 
-          old = '<button class="btn secondary clear-chat" id="clearChat">New Chat</button>'
-          if old in s:
-              new = '<div class="assistant-head-actions"><button class="btn secondary clear-chat" id="clearChat">New Chat</button><button class="assistant-close" id="closeAssistant" type="button" aria-label="Close AI Assistant" title="Close">×</button></div>'
-              s = s.replace(old, new, 1)
+          # The main app already contains the AI Assistant as a normal sidebar/menu panel.
+          # Remove the old Express-injected floating FAB/chat so there is only one assistant UI.
+          start = s.find("// Add the AI Work Assistant UI to the existing app without replacing the user's current design.")
+          if start != -1:
+              end = s.find("app.use(express.static", start)
+              if end == -1:
+                  raise SystemExit('Could not find end of floating assistant injection block')
+              replacement = "app.get('/', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));\n\n"
+              s = s[:start] + replacement + s[end:]
 
-          if '.assistant-close{' not in s:
-              anchor = '.clear-chat{font-size:12px;padding:8px 10px}'
-              if anchor not in s:
-                  raise SystemExit('clear-chat CSS anchor not found')
-              css = anchor + '.assistant-head-actions{display:flex;align-items:center;gap:8px}.assistant-close{width:38px;height:38px;border:1px solid #e0e6ee;border-radius:10px;background:#fff;color:#344054;font-size:24px;line-height:1;cursor:pointer;display:grid;place-items:center;transition:.18s}.assistant-close:hover{background:#fff1f0;border-color:#f3c7c2;color:#b42318;transform:translateY(-1px);box-shadow:0 5px 14px rgba(16,35,63,.08)}.assistant-close:focus-visible{outline:3px solid rgba(23,105,224,.18);outline-offset:2px}'
-              s = s.replace(anchor, css, 1)
-
-          if "$('closeAssistant').onclick" not in s:
-              js = "$('clearChat').onclick=()=>{assistantMessages=[];localStorage.removeItem('ntekAssistantChat');renderAssistant();toast('New chat started')};"
-              if js not in s:
-                  raise SystemExit('clearChat JS handler not found')
-              s = s.replace(js, js + "$('closeAssistant').onclick=()=>{showTab('dashboard');toast('AI Assistant closed')};", 1)
+          # Make the seller's reusable message playbook part of the AI's decision rules.
+          marker = "    'Return only the final customer-facing message, with no analysis, labels, notes, or explanation.'\n"
+          playbook = """    'NTEK REPLY PLAYBOOK: Treat the seller-provided message templates as behavioural examples, not text to copy blindly. Select the appropriate pattern from the buyer intent and confirmed context, then write a fresh natural reply. Preserve only facts actually supplied by the seller.',
+    'OUT-OF-STOCK / OFFER COLOUR: When the ordered variation is out of stock and confirmed alternative colours are supplied, clearly name the ordered colour and available alternatives, apologise briefly, ask which available colour the buyer prefers, and only say dispatch will follow immediately if that dispatch timing is actually confirmed.',
+    'OUT-OF-STOCK / OFFER SIZE: When the ordered size is unavailable and a confirmed alternative size is supplied, state the unavailable size and available option clearly and ask the buyer which option they prefer. Do not invent sizes or stock.',
+    'OUT-OF-STOCK / LAST DAMAGED STOCK: If the seller confirms the last pieces were damaged during a quality check and no stock remains, explain this honestly and offer only the confirmed options such as a full refund or another item of the same value. Do not promise an outcome before the buyer chooses.',
+    'MANUAL / NOTE / NOTHING ORDER: If the selected variation is a user manual, wholesale note, documentation option, or otherwise not the physical product, explain the distinction clearly and politely. Ask the buyer to confirm whether it was intentional; if the seller supplied a specific listing link, it may be included exactly as supplied.',
+    'ORDER CONFIRMATION / DISPATCH: If the seller has confirmed the exact colour, size, quantity and dispatch timing, confirm those facts directly. Do not repeat the same sentence twice and do not add unsupported details.',
+    'GENERAL PRODUCT OUT OF STOCK: If the ordered product is confirmed out of stock, apologise and offer only confirmed alternatives such as refund or another item of the same value. Do not invent reasons such as increased demand unless supplied.',
+    'PACKAGE CONTENTS: For variation listings, explain that the buyer receives the option selected from the drop-down menu. Do not imply the buyer receives every variation unless that is confirmed.',
+    'EXPENSIVE POSTCODE / EXTRA POSTAGE: Only mention an additional postage charge when the seller explicitly supplies the amount and reason. State the requested extra amount clearly and politely; do not invent postcode classifications or charges.',
+    'REMINDER / MANUAL FOLLOW-UP: If following up about a previous manual/note order, briefly remind the buyer what was selected, explain what the correct physical-product option is, and include a supplied listing link exactly as provided. Never fabricate a link.',
+    'COUNTER OFFER: When the seller asks for a counter-offer reply, thank the buyer for the offer, state the exact best price supplied by the seller, keep the tone friendly and concise, and do not invent a price.',
+    'TEMPLATE SIGNATURES: Names such as Jessica, Selena, Dooma or other names appearing in old templates are examples only. Never use them unless the current seller context explicitly provides that exact signature. Prefer the configured NTEK signature when supplied.',
+    'TEMPLATE STYLE: Avoid long formal letters, unnecessary subject lines, repeated thank-you paragraphs, excessive apologies, and robotic phrases. Match the buyer's actual message and keep the response ready to paste into eBay.',
+"""
+          if marker not in s:
+              raise SystemExit('Reply rules marker not found')
+          if 'NTEK REPLY PLAYBOOK:' not in s:
+              s = s.replace(marker, marker + playbook, 1)
 
           p.write_text(s, encoding='utf-8')
           PY
+
+      - name: Verify changes
+        run: |
+          node --check server.js
+          ! grep -q 'ntekAssistantFab' server.js
+          ! grep -q 'Add the AI Work Assistant UI' server.js
+          grep -q 'NTEK REPLY PLAYBOOK' server.js
 
       - name: Commit patch
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add public/index.html
+          git add server.js
           git diff --cached --quiet && exit 0
-          git commit -m "Fix AI assistant close button"
+          git commit -m "Remove floating assistant and improve NTEK reply playbook"
           git push
